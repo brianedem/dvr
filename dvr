@@ -1,0 +1,70 @@
+#!/usr/bin/python
+#
+# This script is to be run daily by cron
+# The script copies all camera images and movies from the previous day to an
+# archive directory.
+#
+# Camera generates files of the format
+#  FrontDoor_01_20171227230000.jpg and FrontDoor_01_20171227230000.mp4
+#
+# The archive directory for these files will be named
+#  <archive_home>/archive_20171227
+
+from datetime import date, timedelta
+import sys, os, time
+import shutil, errno
+
+    # Configuration parameters
+image_dir = "/home/pi/images"       # location of camera files
+archive_home = image_dir            # directory for the image archive
+archive_limit = 30                  # number of days before files are deleted
+
+    # perform some housekeeping before we start moving things around
+    # - delete the old stuff
+archive_cutoff = time.time() - archive_limit*24*60*60
+for name in os.listdir(archive_home) :
+    if "archive-" in name :
+        archive = os.path.join(archive_home, name)
+        stat = os.stat(archive)
+        if stat.st_mtime < archive_cutoff :
+            print "removing %s" % archive
+            shutil.rmtree(archive)
+
+    # - check available disk space and trim until everything fits
+disk_stat = os.statvfs(archive_home)
+disk_avail = disk_stat.f_bsize * disk_stat.f_bavail
+if disk_avail < 2*(2**30) :     # make sure there is at least 2G of disk space available
+        # if not, trim the oldest archive
+    names = os.listdir(archive_home)
+    names.sort(reverse=True)    # archive names will sort in time order
+    for name in names :
+        if "archive-" in name :
+            shutil.rmtree(name)
+            break
+    
+    # OK, now we can archive yesterday's files
+
+    # determine yesterday's date
+yesterday_time = date.today() - timedelta(days=1)
+yesterday_date = yesterday_time.strftime('%Y%m%d')
+
+    # create a new archive directory if it does not already exist
+archive_dir = os.path.join(archive_home, "archive-"+yesterday_date)
+try :
+    os.mkdir(archive_dir)
+
+    # indicate an error for anything other than the directory already exists
+except OSError as e :
+    if e.errno != errno.EEXIST :
+        sys.exit("Unable to create directory %s" % archive_dir)
+
+names = os.listdir(image_dir)
+for name in names:
+        # only copy yesterday's files
+    if "_"+yesterday_date in name :
+        src = os.path.join(image_dir, name)
+        dest = os.path.join(archive_dir, name)
+        try :
+            os.rename(src, dest)
+        except :
+            sys.exit("Unable to copy %s to %s" % (src, dest))
